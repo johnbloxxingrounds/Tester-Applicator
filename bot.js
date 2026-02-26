@@ -1,10 +1,14 @@
 // bot.js
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const http = require("http");
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 const VOTE_CHANNEL_ID = "1476702659653275718";
 const REQUIRED_VOTES = 3;
+
+// Keep Render happy with a dummy HTTP server
+http.createServer((req, res) => res.end("OK")).listen(process.env.PORT || 3000);
 
 // Track votes: { messageId: { approve: Set, deny: Set, row: number } }
 const voteTracker = new Map();
