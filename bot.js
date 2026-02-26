@@ -1,16 +1,11 @@
 // bot.js
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const http = require("http");
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 const VOTE_CHANNEL_ID = "1476702659653275718";
 const REQUIRED_VOTES = 3;
 
-// Keep Render happy with a dummy HTTP server
-http.createServer((req, res) => res.end("OK")).listen(process.env.PORT || 3000);
-
-// Track votes: { messageId: { approve: Set, deny: Set, row: number } }
 const voteTracker = new Map();
 
 const client = new Client({
@@ -28,10 +23,17 @@ client.once("ready", () => {
 });
 
 client.on("error", (err) => {
-  console.error("Discord client error:", err);
+  console.error("Client error:", err);
 });
 
-// Extract row number from embed footer e.g. "Sheet Row #4 • React below..."
+client.on("warn", (info) => {
+  console.warn("Client warn:", info);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
+
 function extractRow(message) {
   const embed = message.embeds && message.embeds[0];
   if (!embed || !embed.footer || !embed.footer.text) return null;
@@ -117,8 +119,7 @@ client.on("messageReactionRemove", async (reaction, user) => {
   if (emoji === "❌") votes.deny.delete(user.id);
 });
 
-console.log("Token starts with:", DISCORD_TOKEN ? DISCORD_TOKEN.substring(0, 10) : "UNDEFINED");
-
 client.login(DISCORD_TOKEN).catch(err => {
-  console.error("Failed to login:", err.message);
+  console.error("Login failed:", err.message);
+  process.exit(1);
 });
