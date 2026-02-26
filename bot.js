@@ -27,6 +27,10 @@ client.once("ready", () => {
   console.log("Bot online as " + client.user.tag);
 });
 
+client.on("error", (err) => {
+  console.error("Discord client error:", err);
+});
+
 // Extract row number from embed footer e.g. "Sheet Row #4 • React below..."
 function extractRow(message) {
   const embed = message.embeds && message.embeds[0];
@@ -44,7 +48,6 @@ async function submitDecision(row, decision, message) {
     });
     const json = await res.json();
     console.log("Sheet updated:", json);
-
     const emoji = decision === "Accepted" ? "✅" : "❌";
     await message.reply(emoji + " **" + decision + "** — Row #" + row + " has been updated in the sheet.");
   } catch (err) {
@@ -114,6 +117,8 @@ client.on("messageReactionRemove", async (reaction, user) => {
   if (emoji === "❌") votes.deny.delete(user.id);
 });
 
-client.login(DISCORD_TOKEN);
-
 console.log("Token starts with:", DISCORD_TOKEN ? DISCORD_TOKEN.substring(0, 10) : "UNDEFINED");
+
+client.login(DISCORD_TOKEN).catch(err => {
+  console.error("Failed to login:", err.message);
+});
