@@ -115,3 +115,5 @@ client.on("messageReactionRemove", async (reaction, user) => {
 });
 
 client.login(DISCORD_TOKEN);
+
+console.log("Token starts with:", DISCORD_TOKEN ? DISCORD_TOKEN.substring(0, 10) : "UNDEFINED");
