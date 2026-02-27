@@ -1,15 +1,12 @@
 // bot.js
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require("discord.js");
-
-// ===== CONFIG =====
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
+const fetch = require("node-fetch"); // npm install node-fetch@2
 const BOT_SECRET = process.env.BOT_SECRET || "supersecret";
-const VOTE_CHANNEL_ID = "1476702659653275718";
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const VOTE_CHANNEL_ID = "YOUR_CHANNEL_ID";
+const POLL_INTERVAL = 15000; // 15 seconds
 const REQUIRED_VOTES = 5;
-const POLL_INTERVAL = 15000; // Poll every 15s
-
-const voteTracker = new Map();
 
 const client = new Client({
   intents: [
@@ -21,12 +18,73 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
-// ===== HELPERS =====
-function extractRow(message) {
-  const embed = message.embeds?.[0];
-  if (!embed?.footer?.text) return null;
-  const match = embed.footer.text.match(/Sheet Row #(\d+)/);
-  return match ? parseInt(match[1]) : null;
+const voteTracker = new Map();
+
+client.once("ready", () => {
+  console.log("Bot online as", client.user.tag);
+  pollSheet();
+});
+
+async function pollSheet() {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: BOT_SECRET })
+    });
+
+    const json = await res.json();
+
+    if (json.row && json.fields) {
+      const channel = await client.channels.fetch(VOTE_CHANNEL_ID);
+      const embed = new EmbedBuilder()
+        .setTitle("📋 New Tester Application")
+        .setColor(0x5865F2)
+        .setFooter({ text: `Sheet Row #${json.row} • React below to vote` })
+        .setTimestamp()
+        .addFields(json.fields);
+
+      const msg = await channel.send({ embeds: [embed] });
+      await msg.react("✅");
+      await msg.react("❌");
+
+      voteTracker.set(msg.id, { approve: new Set(), deny: new Set(), row: json.row });
+    }
+  } catch (err) {
+    console.error("Polling error:", err);
+  } finally {
+    setTimeout(pollSheet, POLL_INTERVAL);
+  }
+}
+
+// Voting logic
+client.on("messageReactionAdd", async (reaction, user) => handleVote(reaction, user, true));
+client.on("messageReactionRemove", async (reaction, user) => handleVote(reaction, user, false));
+
+async function handleVote(reaction, user, added) {
+  if (user.bot || reaction.message.channelId !== VOTE_CHANNEL_ID) return;
+  if (reaction.partial) await reaction.fetch();
+  if (reaction.message.partial) await reaction.message.fetch();
+
+  const votes = voteTracker.get(reaction.message.id);
+  if (!votes) return;
+
+  const emoji = reaction.emoji.name;
+  if (emoji === "✅") {
+    added ? votes.approve.add(user.id) : votes.approve.delete(user.id);
+    votes.deny.delete(user.id);
+  } else if (emoji === "❌") {
+    added ? votes.deny.add(user.id) : votes.deny.delete(user.id);
+    votes.approve.delete(user.id);
+  } else return;
+
+  if (votes.approve.size >= REQUIRED_VOTES) {
+    await submitDecision(votes.row, "Accepted", reaction.message);
+    voteTracker.delete(reaction.message.id);
+  } else if (votes.deny.size >= REQUIRED_VOTES) {
+    await submitDecision(votes.row, "Denied", reaction.message);
+    voteTracker.delete(reaction.message.id);
+  }
 }
 
 async function submitDecision(row, decision, message) {
@@ -37,99 +95,11 @@ async function submitDecision(row, decision, message) {
       body: JSON.stringify({ secret: BOT_SECRET, row, decision })
     });
     const json = await res.json();
-    console.log(`Row #${row} updated: ${decision}`, json);
-
-    if (message && (decision === "Accepted" || decision === "Denied")) {
-      const emoji = decision === "Accepted" ? "✅" : "❌";
-      await message.reply(`${emoji} **${decision}** — Row #${row} updated.`);
-    }
+    console.log(`Row ${row} marked ${decision}`, json);
+    await message.reply(`${decision === "Accepted" ? "✅" : "❌"} **${decision}** — Row #${row} updated.`);
   } catch (err) {
     console.error("Failed to update sheet:", err);
   }
 }
 
-// Poll Apps Script for new applications
-async function pollSheet() {
-  try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ secret: BOT_SECRET })
-    });
-
-    const data = await res.json();
-    if (!data.row) return;
-
-    const fields = data.fields.map(f => ({
-      name: f.name,
-      value: String(f.value || "N/A").substring(0, 1024),
-      inline: !!f.inline
-    }));
-
-    const embed = new EmbedBuilder()
-      .setTitle("📋 New Tester Application")
-      .setColor(0x5865F2)
-      .setFooter({ text: `Sheet Row #${data.row} • React below to vote` })
-      .setTimestamp()
-      .addFields(fields);
-
-    const channel = await client.channels.fetch(VOTE_CHANNEL_ID);
-    const msg = await channel.send({ embeds: [embed] });
-    await msg.react("✅");
-    await msg.react("❌");
-
-    await submitDecision(data.row, "Posted");
-  } catch (err) {
-    console.error("Polling error:", err);
-  }
-}
-
-// ===== REACTIONS =====
-client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot || reaction.message.channelId !== VOTE_CHANNEL_ID) return;
-
-  if (reaction.partial) await reaction.fetch();
-  if (reaction.message.partial) await reaction.message.fetch();
-
-  const message = reaction.message;
-  const emoji = reaction.emoji.name;
-  const messageId = message.id;
-  const row = extractRow(message);
-  if (!row) return;
-
-  if (!voteTracker.has(messageId)) voteTracker.set(messageId, { approve: new Set(), deny: new Set(), row });
-
-  const votes = voteTracker.get(messageId);
-  if (emoji === "✅") { votes.deny.delete(user.id); votes.approve.add(user.id); }
-  if (emoji === "❌") { votes.approve.delete(user.id); votes.deny.add(user.id); }
-
-  if (votes.approve.size >= REQUIRED_VOTES) {
-    voteTracker.delete(messageId);
-    await submitDecision(row, "Accepted", message);
-  } else if (votes.deny.size >= REQUIRED_VOTES) {
-    voteTracker.delete(messageId);
-    await submitDecision(row, "Denied", message);
-  }
-});
-
-client.on("messageReactionRemove", async (reaction, user) => {
-  if (user.bot || reaction.message.channelId !== VOTE_CHANNEL_ID) return;
-  if (reaction.partial) await reaction.fetch();
-
-  const votes = voteTracker.get(reaction.message.id);
-  if (!votes) return;
-
-  if (reaction.emoji.name === "✅") votes.approve.delete(user.id);
-  if (reaction.emoji.name === "❌") votes.deny.delete(user.id);
-});
-
-// ===== START BOT =====
-client.once("ready", () => {
-  console.log("Bot online as " + client.user.tag);
-  setInterval(pollSheet, POLL_INTERVAL);
-});
-
-client.login(DISCORD_TOKEN).catch(err => {
-  console.error("Login failed:", err.message);
-  process.exit(1);
-});
+client.login(DISCORD_TOKEN);
