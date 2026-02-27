@@ -1,10 +1,12 @@
 // bot.js
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require("discord.js");
+const http = require("http");
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 const VOTE_CHANNEL_ID = "1476702659653275718";
 const REQUIRED_VOTES = 5;
+const BOT_SECRET = process.env.BOT_SECRET || "supersecret";
 
 const voteTracker = new Map();
 
@@ -38,12 +40,12 @@ async function submitDecision(row, decision, message) {
     const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row: row, decision: decision })
+      body: JSON.stringify({ row, decision })
     });
     const json = await res.json();
     console.log("Sheet updated:", json);
     const emoji = decision === "Accepted" ? "✅" : "❌";
-    await message.reply(emoji + " **" + decision + "** — Row #" + row + " has been updated. Next application incoming...");
+    await message.reply(emoji + " **" + decision + "** — Row #" + row + " updated. Next application incoming...");
   } catch (err) {
     console.error("Failed to update sheet:", err);
   }
@@ -67,7 +69,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
   if (!row) return;
 
   if (!voteTracker.has(messageId)) {
-    voteTracker.set(messageId, { approve: new Set(), deny: new Set(), row: row });
+    voteTracker.set(messageId, { approve: new Set(), deny: new Set(), row });
   }
 
   const votes = voteTracker.get(messageId);
@@ -103,12 +105,55 @@ client.on("messageReactionRemove", async (reaction, user) => {
 
   const messageId = reaction.message.id;
   const emoji = reaction.emoji.name;
-
   if (!voteTracker.has(messageId)) return;
 
   const votes = voteTracker.get(messageId);
   if (emoji === "✅") votes.approve.delete(user.id);
   if (emoji === "❌") votes.deny.delete(user.id);
+});
+
+// HTTP server to receive post requests from Apps Script
+const server = http.createServer(async (req, res) => {
+  if (req.method !== "POST" || req.url !== "/post") {
+    res.writeHead(404).end("Not found");
+    return;
+  }
+
+  let body = "";
+  req.on("data", chunk => body += chunk);
+  req.on("end", async () => {
+    try {
+      const data = JSON.parse(body);
+
+      if (data.secret !== BOT_SECRET) {
+        res.writeHead(403).end("Forbidden");
+        return;
+      }
+
+      const channel = await client.channels.fetch(VOTE_CHANNEL_ID);
+
+      const embed = new EmbedBuilder()
+        .setTitle("📋 New Tester Application")
+        .setColor(0x5865F2)
+        .setFooter({ text: "Sheet Row #" + data.row + " • React below to vote" })
+        .setTimestamp()
+        .addFields(data.fields);
+
+      const msg = await channel.send({ embeds: [embed] });
+      await msg.react("✅");
+      await msg.react("❌");
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, messageId: msg.id }));
+    } catch (err) {
+      console.error("HTTP handler error:", err);
+      res.writeHead(500).end("Error");
+    }
+  });
+});
+
+server.listen(process.env.PORT || 3000, () => {
+  console.log("HTTP server listening on port " + (process.env.PORT || 3000));
 });
 
 client.login(DISCORD_TOKEN).catch(err => {
