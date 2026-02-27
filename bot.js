@@ -1,16 +1,19 @@
 // bot.js
-import { Client, GatewayIntentBits, Partials, EmbedBuilder } from "discord.js";
-import fetch from "node-fetch"; // If Node < 18
+const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require("discord.js");
+const fetch = require("node-fetch"); // for Node < 18
 
+// ========== CONFIG ==========
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL; // your Apps Script URL
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL; // Your Apps Script Web App URL
 const VOTE_CHANNEL_ID = "1476702659653275718";
 const REQUIRED_VOTES = 5;
 const POLL_INTERVAL = 15000; // 15 seconds
 const BOT_SECRET = process.env.BOT_SECRET || "supersecret";
 
+// ========== STATE ==========
 const voteTracker = new Map();
 
+// ========== CLIENT ==========
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -21,9 +24,9 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
-// ==========================
-// Helper: extract row number from embed footer
-// ==========================
+// ========== HELPERS ==========
+
+// Extract the row number from the embed footer
 function extractRow(message) {
   const embed = message.embeds?.[0];
   if (!embed?.footer?.text) return null;
@@ -31,9 +34,7 @@ function extractRow(message) {
   return match ? parseInt(match[1]) : null;
 }
 
-// ==========================
 // Submit a decision to the Apps Script
-// ==========================
 async function submitDecision(row, decision, message) {
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -51,9 +52,7 @@ async function submitDecision(row, decision, message) {
   }
 }
 
-// ==========================
 // Poll Apps Script for new rows
-// ==========================
 async function pollSheet() {
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
@@ -83,7 +82,7 @@ async function pollSheet() {
     await msg.react("✅");
     await msg.react("❌");
 
-    // Mark as posted
+    // Mark as Posted immediately
     await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -94,9 +93,8 @@ async function pollSheet() {
   }
 }
 
-// ==========================
-// Handle reactions (votes)
-// ==========================
+// ========== REACTION HANDLING ==========
+
 client.on("messageReactionAdd", async (reaction, user) => {
   if (user.bot || reaction.message.channelId !== VOTE_CHANNEL_ID) return;
   if (reaction.partial) await reaction.fetch();
@@ -113,6 +111,8 @@ client.on("messageReactionAdd", async (reaction, user) => {
   const votes = voteTracker.get(messageId);
   if (emoji === "✅") { votes.deny.delete(user.id); votes.approve.add(user.id); }
   if (emoji === "❌") { votes.approve.delete(user.id); votes.deny.add(user.id); }
+
+  console.log(`Row ${row} — Approve: ${votes.approve.size}, Deny: ${votes.deny.size}`);
 
   if (votes.approve.size >= REQUIRED_VOTES) {
     voteTracker.delete(messageId);
@@ -133,12 +133,13 @@ client.on("messageReactionRemove", async (reaction, user) => {
   if (reaction.emoji.name === "❌") votes.deny.delete(user.id);
 });
 
-// ==========================
-// Start bot and polling
-// ==========================
+// ========== BOT START ==========
 client.once("ready", () => {
   console.log("Bot online as " + client.user.tag);
-  setInterval(pollSheet, POLL_INTERVAL);
+  setInterval(pollSheet, POLL_INTERVAL); // start polling every 15 seconds
 });
 
-client.login(DISCORD_TOKEN);
+client.login(DISCORD_TOKEN).catch(err => {
+  console.error("Login failed:", err.message);
+  process.exit(1);
+});
