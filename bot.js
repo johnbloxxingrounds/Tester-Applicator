@@ -4,7 +4,7 @@ const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 const VOTE_CHANNEL_ID = "1476702659653275718";
-const REQUIRED_VOTES = 3;
+const REQUIRED_VOTES = 5;
 
 const voteTracker = new Map();
 
@@ -22,17 +22,9 @@ client.once("ready", () => {
   console.log("Bot online as " + client.user.tag);
 });
 
-client.on("error", (err) => {
-  console.error("Client error:", err);
-});
-
-client.on("warn", (info) => {
-  console.warn("Client warn:", info);
-});
-
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled rejection:", err);
-});
+client.on("error", (err) => console.error("Client error:", err));
+client.on("warn", (info) => console.warn("Client warn:", info));
+process.on("unhandledRejection", (err) => console.error("Unhandled rejection:", err));
 
 function extractRow(message) {
   const embed = message.embeds && message.embeds[0];
@@ -51,7 +43,7 @@ async function submitDecision(row, decision, message) {
     const json = await res.json();
     console.log("Sheet updated:", json);
     const emoji = decision === "Accepted" ? "✅" : "❌";
-    await message.reply(emoji + " **" + decision + "** — Row #" + row + " has been updated in the sheet.");
+    await message.reply(emoji + " **" + decision + "** — Row #" + row + " has been updated. Next application incoming...");
   } catch (err) {
     console.error("Failed to update sheet:", err);
   }
